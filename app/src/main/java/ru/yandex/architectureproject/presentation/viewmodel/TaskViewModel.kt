@@ -3,6 +3,7 @@ package ru.yandex.architectureproject.presentation.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -29,6 +30,7 @@ class TaskViewModel(
 ) : ViewModel() {
     private val _state = MutableStateFlow<TaskState>(TaskState.Loading)
     val state: StateFlow<TaskState> = _state.asStateFlow()
+    val completeJobs: MutableMap<Int, Job?> = mutableMapOf()
 
     init {
         reduce(TaskAction.LoadTasks)
@@ -36,6 +38,45 @@ class TaskViewModel(
 
     fun reduce(action: TaskAction) {
         // TODO: Здесь должна быть обработка действий
+        viewModelScope.launch {
+            when (action) {
+
+                TaskAction.LoadTasks -> loadTasks()
+
+                is TaskAction.AddTask -> addTaskUseCase(action.task)
+
+                is TaskAction.DeleteTask -> {
+                    completeJobs.remove(action.id)?.cancel() // чтобы избежать удаления удаленного
+                    deleteTaskUseCase(action.id)
+                }
+
+                is TaskAction.UpdateTaskStatus -> {
+
+                    if (action.isDone) {
+
+                        completeJobs[action.id]?.cancel()
+
+                        val job = launch { // отдельная задача
+                            try {
+                                completeTaskUseCase(action.id)
+                            } finally {
+                                completeJobs.remove(action.id)
+                            }
+                        }
+
+                        completeJobs[action.id] = job
+
+                    } else {
+
+                        completeJobs.remove(action.id)?.cancel()
+                        incompleteTaskUseCase(action.id)
+
+                    }
+
+                } // if
+
+            } // when
+        }
     }
 
     private suspend fun loadTasks() {
